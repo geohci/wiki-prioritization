@@ -2,6 +2,7 @@ import argparse
 import time
 
 import mwapi
+import requests
 
 GENDER_QID_TO_LABEL = {'Q6581097':'Man', 'Q6581072':'Woman'}
 
@@ -90,7 +91,23 @@ def add_gender_data(candidates, wd_session, gdata):
         else:
             print("Missing from gender data:", c)
 
-
+def add_region_data(candidates, gdata):
+    """Add gender data (P21) for Wikidata items if humans (P31:Q5)"""
+    qids = '|'.join([c['pageprops']['wikibase_item'] for c in candidates if c.get('pageprops', {}).get('wikibase_item')])
+    REGION_QUERY_BASE = {
+        'qid': qids
+    }
+    session = requests.Session()
+    region_data = session.get(url='https://wiki-region.wmcloud.org/api/v1/region', params=REGION_QUERY_BASE).json()
+    region_data = {r['qid']:r['regions'] for r in region_data if r['regions']}
+    for i in range(len(candidates)):
+        c = candidates[i]
+        qid = c.get('pageprops', {}).get('wikibase_item')
+        if qid and qid in region_data:
+            c['regions'] = region_data[qid]
+            gdata['regions'] = gdata.get('regions', 0) + 1
+            for region in region_data[qid]:
+                gdata[region] = gdata.get(region, 0) + 1
 
 def wikidata_description_add(iter=1, lang='en'):
     """Simulates process of generating Wikidata items to be recommended for descriptions in the Android App.
@@ -119,13 +136,16 @@ def wikidata_description_add(iter=1, lang='en'):
     num_recs = 0
     reasons = {'missing':0, 'disambiguation':0, 'wikibase_missing':0, 'has_description':0, 'protected':0}
     candidate_gdata = {}
+    candidate_rdata = {}
     rec_gdata = {}
+    rec_rdata = {}
     for iter_idx in range(iter):
         print("== Iteration #{0}/{1} ==".format(iter_idx + 1, iter))
         # generate candidates and add in gender data
         candidates = lang_session.get(**CANDIDATE_QUERY_BASE)
         candidates = candidates['query']['pages']
         add_gender_data(candidates, wd_session, candidate_gdata)
+        add_region_data(candidates, candidate_rdata)
         num_candidates += len(candidates)
 
         # filter articles to acceptable Wikidata items
@@ -152,6 +172,10 @@ def wikidata_description_add(iter=1, lang='en'):
             if items_to_rec[qid].get('gender'):
                 rec_gdata['humans'] = rec_gdata.get('humans', 0) + 1
                 rec_gdata[items_to_rec[qid]['gender']] = rec_gdata.get(items_to_rec[qid]['gender'], 0) + 1
+            if items_to_rec[qid].get('regions'):
+                rec_rdata['regions'] = rec_rdata.get('regions', 0) + 1
+                for r in items_to_rec[qid]['regions']:
+                    rec_rdata[r] = rec_rdata.get(r, 0) + 1
 
         time.sleep(1)
 
@@ -165,15 +189,27 @@ def wikidata_description_add(iter=1, lang='en'):
 
     print("\nGender data:")
     print("{0} candidates and {1} were humans with gender info:".format(num_candidates, candidate_gdata['humans']))
-    for g in candidate_gdata:
+    for g in sorted(candidate_gdata, key=candidate_gdata.get, reverse=True):
         if g != 'humans':
-            print("\t{0}: {1} ({2:1f}% of humans)".format(GENDER_QID_TO_LABEL.get(g, g), candidate_gdata[g],
-                                                          candidate_gdata[g] / candidate_gdata['humans']))
-    print("{0} candidates and {1} were humans with gender info:".format(num_recs, rec_gdata['humans']))
-    for g in rec_gdata:
+            print("\t{0}: {1} ({2:.1f}% of humans)".format(GENDER_QID_TO_LABEL.get(g, g), candidate_gdata[g],
+                                                           100 * candidate_gdata[g] / candidate_gdata['humans']))
+    print("{0} recommendations and {1} were humans with gender info:".format(num_recs, rec_gdata['humans']))
+    for g in sorted(rec_gdata, key=rec_gdata.get, reverse=True):
         if g != 'humans':
-            print("\t{0}: {1} ({2:1f}% of humans)".format(GENDER_QID_TO_LABEL.get(g, g), rec_gdata[g],
-                                                        rec_gdata[g] / rec_gdata['humans']))
+            print("\t{0}: {1} ({2:.1f}% of humans)".format(GENDER_QID_TO_LABEL.get(g, g), rec_gdata[g],
+                                                           100 * rec_gdata[g] / rec_gdata['humans']))
+
+    print("\nRegion data:")
+    print("{0} candidates and {1} were articles with relevant regions:".format(num_candidates, candidate_rdata['regions']))
+    for r in sorted(candidate_rdata, key=candidate_rdata.get, reverse=True):
+        if r != 'regions':
+            print("\t{0}: {1} ({2:.1f}% of regions)".format(r, candidate_rdata[r],
+                                                           100 * candidate_rdata[r] / candidate_rdata['regions']))
+    print("{0} recommendations and {1} were articles with relevant regions:".format(num_recs, rec_rdata['regions']))
+    for r in sorted(rec_rdata, key=rec_rdata.get, reverse=True):
+        if r != 'regions':
+            print("\t{0}: {1} ({2:.1f}% of regions)".format(r, rec_rdata[r],
+                                                           100 * rec_rdata[r] / rec_rdata['regions']))
 
 
 def main():
