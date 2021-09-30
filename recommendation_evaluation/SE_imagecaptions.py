@@ -1,4 +1,5 @@
 import argparse
+import random
 import time
 
 import mwapi
@@ -177,16 +178,18 @@ def image_captions_add(iter=1, lang='en'):
         'gunamespace': 0,
         'guprop': 'pageid',
         'format': 'json',
-        'gusite': '{0}wiki'.format(lang)
+#        'gusite': '{0}wiki'.format(lang)
     }
 
     num_candidates = 0
     num_inuse = 0
+    num_elsewhere = 0
     num_inuse_recs = 0
     num_images = 0
     num_recs = 0
     sd_counts = {'missing':0, 'exists':0, 'none':0, 'N/A':0}
     candidate_articles = set()
+    cand_to_img = {}
     recommended_articles = set()
     for iter_idx in range(iter):
         print("== Iteration #{0}/{1} ==".format(iter_idx + 1, iter))
@@ -197,15 +200,26 @@ def image_captions_add(iter=1, lang='en'):
 
         # filter to images
         images = filter_images(candidates)
-        for i in images:
-            if images[i]['globalusage']:
-                for s in images[i]['globalusage']:
-                    candidate_articles.add(s['title'])
         editable_images = filter_protections(images)
+        num_images += len(editable_images)
         if len(images) != len(editable_images):
             print("\t =={0} removed for page protections==".format(len(images) - len(editable_images)))
-        num_inuse += len([i for i in editable_images if editable_images[i]['globalusage']])
-        num_images += len(editable_images)
+        for i in editable_images:
+            other_wiki = False
+            titles = []
+            if editable_images[i]['globalusage']:
+                for s in editable_images[i]['globalusage']:
+                    if s['wiki'] == 'en.wikipedia.org':
+                        titles.append(s['title'])
+                    elif 'wikipedia' in s['wiki'] or 'wikidata' in s['wiki']:
+                        other_wiki = True
+            if titles:
+                num_inuse += 1
+                selected_title = random.choice(titles)
+                candidate_articles.add(selected_title)
+                cand_to_img[i] = selected_title
+            elif other_wiki:
+                num_elsewhere += 1
 
         # add existing caption info
         SD_QUERY_BASE = {
@@ -224,15 +238,15 @@ def image_captions_add(iter=1, lang='en'):
         num_recs += len(images_to_rec)
         for i in images_to_rec:
             if images_to_rec[i]['globalusage']:
-                num_inuse_recs += 1
-                for s in images_to_rec[i]['globalusage']:
-                    recommended_articles.add(s['title'])
+                if i in cand_to_img:
+                    num_inuse_recs += 1
+                    recommended_articles.add(cand_to_img[i])
         time.sleep(1)
 
     print("\nFinal statistics:")
     print("Started with {0} candidates".format(num_candidates))
-    print("Filtered to {0} images ({1:.1f}% of candidates) -- {2} ({3:.1f}% of images) in use on {4}wiki".format(
-        num_images, 100 * num_images / num_candidates, num_inuse, 100 * num_inuse / num_images, lang))
+    print("Filtered to {0} images ({1:.1f}% of candidates) -- {2} ({3:.1f}% of images) in use on {4}wiki and {5} ({6:.1f}%) elsewhere".format(
+        num_images, 100 * num_images / num_candidates, num_inuse, 100 * num_inuse / num_images, lang, num_elsewhere, 100 * num_elsewhere / num_images))
     print("Details about existing structured data on Commons for these images:")
     for c in sd_counts:
         print("\t{0}:\t{1} ({2:.1f}%)".format(c, sd_counts[c], 100 * sd_counts[c] / num_images))

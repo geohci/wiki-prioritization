@@ -205,7 +205,8 @@ def main():
                MAX(p.page_title) AS title,
                MAX(ptalk.page_id) AS talk_pid,
                MAX(ptalk.page_latest) AS talk_revid,
-               GROUP_CONCAT(DISTINCT pa.pa_importance SEPARATOR '{0}') AS importance
+               GROUP_CONCAT(DISTINCT pa.pa_importance SEPARATOR '{0}') AS importance,
+               GROUP_CONCAT(DISTINCT pa.pa_class SEPARATOR '{0}') AS quality
           FROM page_assessments pa
          INNER JOIN page_assessments_projects pap
                ON (pa.pa_project_id = pap.pap_project_id)
@@ -221,7 +222,7 @@ def main():
     pids_to_metadata = {}
     with open(args.page_assessments_tsv, 'r') as fin:
         tsvreader = csv.reader(fin, delimiter='\t')
-        assert next(tsvreader) == ['article_pid', 'wp_templates', 'article_revid', 'title', 'talk_pid', 'talk_revid', 'importance']
+        assert next(tsvreader) == ['article_pid', 'wp_templates', 'article_revid', 'title', 'talk_pid', 'talk_revid', 'importance', 'quality']
         for line in tsvreader:
             pid = int(line[0])
             wp_templates = line[1].split(sep)
@@ -230,12 +231,14 @@ def main():
             tpid = int(line[4])
             trid = int(line[5])
             imp = line[6].split(sep)
+            qual = line[7].split(sep)
             pids_to_metadata[pid] = {'wp_templates':wp_templates,
                                      'article_revid':rid,
                                      'title':title,
                                      'talk_pid':tpid,
                                      'talk_revid':trid,
-                                     'importance':imp}
+                                     'importance':imp,
+                                     'quality':qual}
     print("{0} pages with WikiProject assessments in {1}.".format(len(pids_to_metadata), db))
 
     # get data for QIDs / sitelinks
@@ -316,8 +319,9 @@ def main():
                 wp_templates = [db_to_enwiki[norm_fn(t)] for t in wp_templates if norm_fn(t) in db_to_enwiki]
             topics = get_topics(wp_templates, wikiproject_to_topic, topic_counts)
             topic_dist[len(topics)] = topic_dist.get(len(topics), 0) + 1
-            pids_to_metadata[pid]['topics'] = topics
-            fout.write(json.dumps(pids_to_metadata[pid]) + "\n")
+            output_json = pids_to_metadata[pid].copy()
+            output_json['topics'] = topics
+            fout.write(json.dumps(output_json) + "\n")
 
     topic_counts = [(t, topic_counts[t]) for t in sorted(topic_counts, key=topic_counts.get, reverse=True)]
     if db == 'enwiki':
